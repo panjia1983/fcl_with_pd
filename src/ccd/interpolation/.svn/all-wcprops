@@ -1,0 +1,23 @@
+K 25
+svn:wc:ra_dav:version-url
+V 72
+/flexible-collision-library/fcl/!svn/ver/214/trunk/src/ccd/interpolation
+END
+interpolation.cpp
+K 25
+svn:wc:ra_dav:version-url
+V 90
+/flexible-collision-library/fcl/!svn/ver/198/trunk/src/ccd/interpolation/interpolation.cpp
+END
+interpolation_factory.cpp
+K 25
+svn:wc:ra_dav:version-url
+V 98
+/flexible-collision-library/fcl/!svn/ver/214/trunk/src/ccd/interpolation/interpolation_factory.cpp
+END
+interpolation_linear.cpp
+K 25
+svn:wc:ra_dav:version-url
+V 97
+/flexible-collision-library/fcl/!svn/ver/198/trunk/src/ccd/interpolation/interpolation_linear.cpp
+END
