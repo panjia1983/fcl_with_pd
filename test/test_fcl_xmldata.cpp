@@ -289,13 +289,13 @@ static void scenePenetrationTest(const std::string& filename, PenetrationDepthTy
   CollisionObject o1(boost::shared_ptr<CollisionGeometry>(m1), id);
   CollisionObject o2(boost::shared_ptr<CollisionGeometry>(m2), id);
 
-  default_transform_distancer = DefaultTransformDistancer(o1.getCollisionGeometry());
+  default_transform_distancer = DefaultTransformDistancer(o2.getCollisionGeometry());
   std::cout << "rotation weights ";
   default_transform_distancer.printRotWeight();
   std::size_t KNN_K = 10;
   LibSVMClassifier<6> classifier;
   
-  std::vector<Transform3f> contact_vectors = penetrationDepthModelLearning(&o1, &o2, pd_type, &classifier, 100000, 0, KNN_GNAT, KNN_K);
+  std::vector<Transform3f> contact_vectors = penetrationDepthModelLearning(&o1, &o2, pd_type, &classifier, 10000, 0, KNN_GNAT, KNN_K);
 
   classifier.save(filename + "model.txt");
 
@@ -329,8 +329,8 @@ BOOST_AUTO_TEST_CASE(scene_test_penetration)
   RNG::setSeed(1);
   boost::filesystem::path path(TEST_RESOURCES_DIR);
 
-  std::cout << "manyframes/Model_5" << std::endl;
-  std::string filename0 = (path / "manyframes/Model_5.xml").string();
+  std::cout << "manyframes/Model_1" << std::endl;
+  std::string filename0 = (path / "manyframes/Model_1.xml").string();
   scenePenetrationTest(filename0);
 
   return;
@@ -416,11 +416,13 @@ BOOST_AUTO_TEST_CASE(xml2obj_test)
 {
   boost::filesystem::path path(TEST_RESOURCES_DIR);
 
-  std::string filename_manyframe0 = (path / "manyframes/Model_5.xml").string();
-  xml2obj(filename_manyframe0, "Model_5");
-
   std::string filename_manyframe1 = (path / "manyframes/Model_1.xml").string();
   xml2obj(filename_manyframe1, "Model_1");
+
+  return;
+
+  std::string filename_manyframe0 = (path / "manyframes/Model_5.xml").string();
+  xml2obj(filename_manyframe0, "Model_5");
   
   std::string filename_manyframe2 = (path / "manyframes/Model_4.xml").string();
   xml2obj(filename_manyframe2, "Model_4");

@@ -67,7 +67,7 @@ public:
   double distance(const Transform3f& tf1, const Transform3f& tf2)
   {
     Transform3f tf;
-    relativeTransform(tf1, tf2, tf); // ????? 
+    relativeTransform2(tf1, tf2, tf);
 
     const Quaternion3f& quat = tf.getQuatRotation();
     const Vec3f& trans = tf.getTranslation();

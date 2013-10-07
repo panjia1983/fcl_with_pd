@@ -317,6 +317,7 @@ std::vector<Transform3f> penetrationDepthModelLearning(const CollisionObject* o1
                         o2->getCollisionGeometry(), nbh[j], support_transforms_positive[i],
                         request, result);
 
+
       //std::cout << result.time_of_contact << std::endl;
 
       contact_vectors.push_back(result.contact_tf2);
@@ -337,6 +338,7 @@ std::vector<Transform3f> penetrationDepthModelLearning(const CollisionObject* o1
       continuousCollide(o1->getCollisionGeometry(), Transform3f(), Transform3f(),
                         o2->getCollisionGeometry(), support_transforms_negative[i], nbh[j],
                         request, result);
+
 
       //std::cout << result.time_of_contact << std::endl;
 
