@@ -32,6 +32,7 @@ std::vector<Transform3f> penetrationDepthModelLearning(const CollisionObject* o1
   
   switch(pd_type)
   {
+    // the rotation of both objects must be indentity
   case PDT_TRANSLATIONAL:
     {
       SVMClassifier<3>* classifier = static_cast<SVMClassifier<3>*>(classifier_);
@@ -48,20 +49,25 @@ std::vector<Transform3f> penetrationDepthModelLearning(const CollisionObject* o1
       
       sampler.setBound(lower_bound, upper_bound);
 
+
       std::vector<Item<3> > data(n_samples);
+      int n = 0;
       for(std::size_t i = 0; i < n_samples; ++i)
       {
         Vecnf<3> q = sampler.sample();
-        Transform3f tf(o2->getQuatRotation(), Vec3f(q[0], q[1], q[2]));
+        Transform3f tf(o1->getQuatRotation(), o1->getTranslation() + Vec3f(q[0], q[1], q[2]));
         
         CollisionRequest request;
         CollisionResult result;
-        
+
         int n_collide = collide(o1->getCollisionGeometry(), o1->getTransform(),
                                 o2->getCollisionGeometry(), tf, request, result);
 
         data[i] = Item<3>(q, (n_collide > 0));
+        if(n_collide > 0) n++;
       }
+
+      std::cout << "number of collisions " << n << std::endl;
 
       // classifier.setScaler(Scaler<3>(lower_bound, upper_bound));
       classifier->setScaler(computeScaler(data));
@@ -73,9 +79,9 @@ std::vector<Transform3f> penetrationDepthModelLearning(const CollisionObject* o1
       {
         const Vecnf<3>& q = svs[i].q;
         if(svs[i].label)
-          support_transforms_positive.push_back(Transform3f(o2->getQuatRotation(), Vec3f(q[0], q[1], q[2])));
+          support_transforms_positive.push_back(Transform3f(Vec3f(q[0], q[1], q[2])));
         else
-          support_transforms_negative.push_back(Transform3f(o2->getQuatRotation(), Vec3f(q[0], q[1], q[2])));
+          support_transforms_negative.push_back(Transform3f(Vec3f(q[0], q[1], q[2])));
       }
       
       break;

@@ -55,6 +55,9 @@ public:
       rot_y_weight = eigen_values[1] * 4 / V;
       rot_z_weight = eigen_values[2] * 4 / V;
 
+      std::cout << "eigens: " << eigen_values[0] << " " << eigen_values[1] << " " << eigen_values[2] << std::endl;
+      std::cout << "volume: " << V << std::endl;
+
       // std::cout << rot_x_weight << " " << rot_y_weight << " " << rot_z_weight << std::endl;
     }
   }

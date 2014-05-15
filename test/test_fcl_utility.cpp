@@ -208,6 +208,33 @@ void saveOBJFile(const char* filename, std::vector<Vec3f>& points, std::vector<T
   os.close();
 }
 
+void savePolyDepthTriFile(const char* filename, std::vector<Vec3f>& points, std::vector<Triangle>& triangles)
+{
+  std::ofstream os(filename);
+  if(!os)
+  {
+    std::cerr << "file not exist" << std::endl;
+    return;
+  }
+
+  os << "TRI" << std::endl;
+  os << points.size() << std::endl;
+  os << triangles.size() << std::endl;
+
+  for(std::size_t i = 0; i < points.size(); ++i)
+  {
+    os << points[i][0] << " " << points[i][1] << " " << points[i][2] << std::endl;
+  }
+
+  for(std::size_t i = 0; i < triangles.size(); ++i)
+  {
+    os << triangles[i][0] << " " << triangles[i][1] << " " << triangles[i][2] << std::endl;
+  }
+
+  os.close();
+}
+
+
 
 void eulerToMatrix(FCL_REAL a, FCL_REAL b, FCL_REAL c, Matrix3f& R)
 {

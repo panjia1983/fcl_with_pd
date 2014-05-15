@@ -41,7 +41,7 @@
 #define FCL_PATCH_VERSION 9
 
 #define FCL_HAVE_SSE 0
-#define FCL_HAVE_OCTOMAP 1
+#define FCL_HAVE_OCTOMAP 0
 #define FCL_HAVE_FLANN 1
 #define FCL_HAVE_TINYXML 1
 

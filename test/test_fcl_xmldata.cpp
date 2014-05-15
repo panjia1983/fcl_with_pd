@@ -8,7 +8,9 @@
 #include "fcl/math/sampling.h"
 #include "fcl/BVH/BVH_model.h"
 #include <boost/filesystem.hpp>
+#include <boost/math/constants/constants.hpp>
 #include <sstream>
+#include <fstream>
 
 
 #include "libsvm_classifier.h"
@@ -19,8 +21,6 @@
 
 
 using namespace fcl;
-
-
 
 static void loadSceneFile(const std::string& filename,
                           std::vector<std::vector<Vec3f> >& points_array,
@@ -168,14 +168,10 @@ static void loadSceneFile(const std::string& filename,
         std::pair<Transform3f, Transform3f> motion = std::make_pair(Transform3f(R1, T1), Transform3f(R2, T2));
         if(frame_id - 1 == (int)motions.size())
           motions.push_back(motion);
-        else if(frame_id - 1 < (int)motions.size())
+        if(frame_id - 1 < (int)motions.size())
           motions[frame_id - 1] = motion;
         else
-        {
-          motions.resize(frame_id);
-          motions.back() = motion;
-        }
-        
+          motions.push_back(motion);        
         
         frame = frame->NextSiblingElement("FRAME");
         n_frame++;
@@ -243,6 +239,7 @@ static void xml2obj(const std::string& in_filename, const std::string& out_filen
     saveOBJFile(out_filenameL.c_str(), points_array[i], triangles_array[i]);
   }
 
+  /*
   // save objs in frame 1
   for(std::size_t i = 0; i < n_obj; ++i)
   {
@@ -264,16 +261,221 @@ static void xml2obj(const std::string& in_filename, const std::string& out_filen
 
     saveOBJFile(out_filenameF2.c_str(), points, triangles_array[i]);
   }
+  */
+}
+
+static void xml2tri(const std::string& in_filename, const std::string& out_filename_base)
+{
+  std::vector<std::vector<Vec3f> > points_array;
+  std::vector<std::vector<Triangle> > triangles_array;
+  std::vector<std::pair<Transform3f, Transform3f> > motions;
+  loadSceneFile(in_filename, points_array, triangles_array, motions);
+
+  std::size_t n_obj = points_array.size();
+  // save in local frame
+  for(std::size_t i = 0; i < n_obj; ++i)
+  {
+    std::string out_filenameL = out_filename_base + num2string(i+1) + ".tri";
+    savePolyDepthTriFile(out_filenameL.c_str(), points_array[i], triangles_array[i]);
+  }
 }
 
 
-static void scenePenetrationTest(const std::string& filename, PenetrationDepthType pd_type = PDT_GENERAL_EULER)
+static void scenePenetrationTest(const std::string& filename, bool reverse = false, PenetrationDepthType pd_type = PDT_GENERAL_EULER)
 {
   std::vector<std::vector<Vec3f> > points_array;
   std::vector<std::vector<Triangle> > triangles_array;
   std::vector<std::pair<Transform3f, Transform3f> > motions;
 
   loadSceneFile(filename, points_array, triangles_array, motions);
+  xml2tri(filename, "trimodel");
+
+  if(reverse)
+  {
+    for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+    {
+      Transform3f tf1 = motions[frame_id].first;
+      Transform3f tf2 = motions[frame_id].second;
+      motions[frame_id].first = tf2;
+      motions[frame_id].second = tf1;
+    }
+
+    std::vector<Vec3f> p1 = points_array[0];
+    std::vector<Vec3f> p2 = points_array[1];
+    points_array[0] = p2;
+    points_array[1] = p1;
+
+    std::vector<Triangle> t1 = triangles_array[0];
+    std::vector<Triangle> t2 = triangles_array[1];
+    triangles_array[0] = t2;
+    triangles_array[1] = t1;
+  }
+
+
+  std::ofstream motion_file("config.txt");
+  for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+  {
+    Transform3f tf1 = motions[frame_id].first;
+    Transform3f tf2 = motions[frame_id].second;
+
+    for(std::size_t i = 0; i < 3; ++i)
+    {
+      for(std::size_t j = 0; j < 3; ++j)
+        motion_file << tf2.getRotation()(i, j) << " ";
+    }
+    motion_file << tf2.getTranslation()[0] << " " << tf2.getTranslation()[1] << " " << tf2.getTranslation()[2] << " ";
+    motion_file << std::endl;
+
+    for(std::size_t i = 0; i < 3; ++i)
+    {
+      for(std::size_t j = 0; j < 3; ++j)
+        motion_file << tf1.getRotation()(i, j) << " ";
+    }
+    motion_file << tf1.getTranslation()[0] << " " << tf1.getTranslation()[1] << " " << tf1.getTranslation()[2] << " ";
+    motion_file << std::endl;
+
+
+    motion_file << std::endl;
+
+  }
+
+  motion_file.close();
+
+  
+
+  BVHModel<OBBRSS>* m1 = new BVHModel<OBBRSS>();
+  BVHModel<OBBRSS>* m2 = new BVHModel<OBBRSS>();
+  m1->beginModel();
+  m1->addSubModel(points_array[0], triangles_array[0]);
+  m1->endModel();
+
+  m2->beginModel();
+  m2->addSubModel(points_array[1], triangles_array[1]);
+  m2->endModel();
+
+  Transform3f id;
+  CollisionObject o1(boost::shared_ptr<CollisionGeometry>(m1), id);
+  CollisionObject o2(boost::shared_ptr<CollisionGeometry>(m2), id);
+
+  default_transform_distancer = DefaultTransformDistancer(o2.getCollisionGeometry());
+  std::cout << "rotation weights ";
+  default_transform_distancer.printRotWeight();
+  std::size_t KNN_K = 10;
+  LibSVMClassifier<6> classifier;
+  
+  std::vector<Transform3f> contact_vectors = penetrationDepthModelLearning(&o1, &o2, pd_type, &classifier, 1000000, 0, KNN_GNAT, KNN_K);
+
+  classifier.save(filename + "model.txt");
+
+  for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+  {
+    CollisionRequest c_request;
+    CollisionResult c_result;
+    collide(m1, motions[frame_id].first, m2, motions[frame_id].second, c_request, c_result);
+    if(c_result.numContacts() == 0)
+      std::cout << "0" << std::endl;
+    else
+    {
+      PenetrationDepthRequest request(&classifier, default_transform_distance_func);
+      request.contact_vectors = contact_vectors;
+      PenetrationDepthResult result;
+
+      penetrationDepth(m1, motions[frame_id].first, m2, motions[frame_id].second, request, result);
+      
+      std::cout << result.pd_value << " ";
+      /*
+      {
+        Transform3f tf;
+        relativeTransform2(result.resolved_tf, motions[frame_id].second, tf);
+        std::cout << tf.getTranslation().length() << " ";
+      }
+
+      std::cout << (result.resolved_tf.getTranslation() - motions[frame_id].second.getTranslation()).length() << " ";
+      */
+
+      
+      for(std::size_t i = 0; i < 3; ++i)
+      {
+        std::cout << result.resolved_tf.getTranslation()[i] << " ";
+      }
+
+      Matrix3f m = result.resolved_tf.getRotation();
+
+      for(std::size_t i = 0; i < 3; ++i)
+      {
+        for(std::size_t j = 0; j < 3; ++j)
+        {
+          std::cout << m(i, j) << " ";
+        }
+      }
+      std::cout << std::endl;
+    }
+    
+  }
+}
+
+
+
+static void scenePenetrationTest_forBenchmark1a(const std::string& filename, PenetrationDepthType pd_type = PDT_GENERAL_EULER)
+{
+  std::vector<std::vector<Vec3f> > points_array;
+  std::vector<std::vector<Triangle> > triangles_array;
+  std::vector<std::pair<Transform3f, Transform3f> > motions;
+
+  loadSceneFile(filename, points_array, triangles_array, motions);
+  xml2tri(filename, "trimodel");
+
+  double delta_theta = boost::math::constants::pi<double>() / 10;
+
+
+  for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+  {
+    Transform3f tf1 = motions[frame_id].first;
+    Transform3f tf2 = motions[frame_id].second;
+    double delta_z = tf1.getTranslation()[2] - motions[0].first.getTranslation()[2];
+
+    motions[frame_id].first = motions[0].first;
+    Matrix3f M;
+    double theta = frame_id * delta_theta;
+    M(0, 0) = cos(theta); M(0, 1) = -sin(theta); M(0, 2) = 0;
+    M(1, 0) = sin(theta); M(1, 1) = cos(theta); M(1, 2) = 0;
+    M(2, 0) = 0; M(2, 1) = 0; M(2, 2) = 1;
+    tf2.setTransform(M, Vec3f(tf2.getTranslation()[0], tf2.getTranslation()[1], tf2.getTranslation()[2] - delta_z));
+    motions[frame_id].second = tf2;
+  }
+
+  // now object 1 is fixed and object2 is moving
+
+  std::ofstream motion_file("config.txt");
+  for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+  {
+    Transform3f tf1 = motions[frame_id].first;
+    Transform3f tf2 = motions[frame_id].second;
+
+    for(std::size_t i = 0; i < 3; ++i)
+    {
+      for(std::size_t j = 0; j < 3; ++j)
+        motion_file << tf2.getRotation()(i, j) << " ";
+    }
+    motion_file << tf2.getTranslation()[0] << " " << tf2.getTranslation()[1] << " " << tf2.getTranslation()[2] << " ";
+    motion_file << std::endl;
+
+    for(std::size_t i = 0; i < 3; ++i)
+    {
+      for(std::size_t j = 0; j < 3; ++j)
+        motion_file << tf1.getRotation()(i, j) << " ";
+    }
+    motion_file << tf1.getTranslation()[0] << " " << tf1.getTranslation()[1] << " " << tf1.getTranslation()[2] << " ";
+    motion_file << std::endl;
+
+
+    motion_file << std::endl;
+
+  }
+
+  motion_file.close();
+
+  
 
   BVHModel<OBBRSS>* m1 = new BVHModel<OBBRSS>();
   BVHModel<OBBRSS>* m2 = new BVHModel<OBBRSS>();
@@ -301,24 +503,263 @@ static void scenePenetrationTest(const std::string& filename, PenetrationDepthTy
 
   for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
   {
-    PenetrationDepthRequest request(&classifier, default_transform_distance_func);
-    request.contact_vectors = contact_vectors;
-    PenetrationDepthResult result;
-
-    penetrationDepth(m1, motions[frame_id].first, m2, motions[frame_id].second, request, result);
-    std::cout << "pd value " << frame_id << " " << result.pd_value << std::endl;
-    std::cout << "resolved tf translation " << result.resolved_tf.getTranslation() << std::endl;
-    std::cout << "resolved tf rotation " << result.resolved_tf.getRotation() << std::endl;
-
-    int num_pd_contacts = 1; // only one contact for pd, you can set a larger number if you want more
-    CollisionRequest pd_contact_request(num_pd_contacts, true);
-    CollisionResult pd_contact_result;
-    collide(m1, motions[frame_id].first, m2, result.resolved_tf, pd_contact_request, pd_contact_result);
-    if(pd_contact_result.numContacts() > 0)
+    CollisionRequest c_request;
+    CollisionResult c_result;
+    collide(m1, motions[frame_id].first, m2, motions[frame_id].second, c_request, c_result);
+    if(c_result.numContacts() == 0)
+      std::cout << "0" << std::endl;
+    else
     {
-      Contact contact = pd_contact_result.getContact(0);
-      std::cout << "contact pos " << contact.pos << std::endl;
-      std::cout << "contact normal " << contact.normal << std::endl;
+      PenetrationDepthRequest request(&classifier, default_transform_distance_func);
+      request.contact_vectors = contact_vectors;
+      PenetrationDepthResult result;
+
+      penetrationDepth(m1, motions[frame_id].first, m2, motions[frame_id].second, request, result);
+
+
+      // std::cout << result.pd_value << " ";
+      {
+        Transform3f tf;
+        relativeTransform2(result.resolved_tf, motions[frame_id].second, tf);
+        std::cout << tf.getTranslation().length() << " ";
+      }
+      
+      for(std::size_t i = 0; i < 3; ++i)
+      {
+        std::cout << result.resolved_tf.getTranslation()[i] << " ";
+      }
+
+      Matrix3f m = result.resolved_tf.getRotation();
+
+      for(std::size_t i = 0; i < 3; ++i)
+      {
+        for(std::size_t j = 0; j < 3; ++j)
+        {
+          std::cout << m(i, j) << " ";
+        }
+      }
+      std::cout << std::endl;
+    }
+    
+  }
+}
+
+
+
+static void scenePenetrationR3Test(const std::string& filename, bool reverse = false)
+{
+  std::vector<std::vector<Vec3f> > points_array;
+  std::vector<std::vector<Triangle> > triangles_array;
+  std::vector<std::pair<Transform3f, Transform3f> > motions;
+
+  loadSceneFile(filename, points_array, triangles_array, motions);
+  xml2tri(filename, "trimodel");
+
+  // reverse when the first object is moving
+  if(reverse)
+  {
+    for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+    {
+      Transform3f tf1 = motions[frame_id].first;
+      Transform3f tf2 = motions[frame_id].second;
+      motions[frame_id].first = tf2;
+      motions[frame_id].second = tf1;
+    }
+
+    std::vector<Vec3f> p1 = points_array[0];
+    std::vector<Vec3f> p2 = points_array[1];
+    points_array[0] = p2;
+    points_array[1] = p1;
+
+    std::vector<Triangle> t1 = triangles_array[0];
+    std::vector<Triangle> t2 = triangles_array[1];
+    triangles_array[0] = t2;
+    triangles_array[1] = t1;
+  }
+  
+  std::ofstream ground_truth_file("ground_truth.txt");
+  for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+  {
+    Transform3f tf1 = motions[frame_id].first;
+    Transform3f tf2 = motions[frame_id].second;
+
+    /*
+    double z1 = tf1.getTranslation()[2];
+    double z2 = tf2.getTranslation()[2];
+
+    double z = z1 - 0.25 - (1.5 + z2);
+    if(z < 0)
+      ground_truth_file << frame_id << " " << fabs(z) << std::endl;
+    else
+      ground_truth_file << frame_id << " " << 0 << std::endl;
+    
+    */
+    
+    double z1 = tf1.getTranslation()[2];
+    double z2 = tf2.getTranslation()[2];
+
+    double pd_z = fabs(z2 - 0.25 - (1.5 + z1));
+
+
+    double x1 = tf1.getTranslation()[0];
+    double x2 = tf2.getTranslation()[0];
+
+    double pd_x = 0;
+    if(x2 - 0.5 < x1 + 5)
+    {
+      pd_x = fabs(x2 - 0.5 - x1 - 5);
+    }
+
+
+    if(pd_x > 0)
+    {
+      ground_truth_file << frame_id << " " << std::min(pd_x, pd_z) << std::endl;
+    }
+    else
+      ground_truth_file << frame_id << " " << 0 << std::endl;
+
+    
+
+    
+  }
+  ground_truth_file.close();
+
+
+  return;
+
+  std::ofstream motion_file("config.txt");
+  for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+  {
+    Transform3f tf1 = motions[frame_id].first;
+    Transform3f tf2 = motions[frame_id].second;
+
+    for(std::size_t i = 0; i < 3; ++i)
+    {
+      for(std::size_t j = 0; j < 3; ++j)
+        motion_file << tf2.getRotation()(i, j) << " ";
+    }
+    motion_file << tf2.getTranslation()[0] << " " << tf2.getTranslation()[1] << " " << tf2.getTranslation()[2] << " ";
+    motion_file << std::endl;
+
+
+    for(std::size_t i = 0; i < 3; ++i)
+    {
+      for(std::size_t j = 0; j < 3; ++j)
+        motion_file << tf1.getRotation()(i, j) << " ";
+    }
+    motion_file << tf1.getTranslation()[0] << " " << tf1.getTranslation()[1] << " " << tf1.getTranslation()[2] << " ";
+    motion_file << std::endl;
+
+    motion_file << std::endl;
+  }
+
+  motion_file.close();
+
+  
+
+  BVHModel<OBBRSS>* m1 = new BVHModel<OBBRSS>();
+  BVHModel<OBBRSS>* m2 = new BVHModel<OBBRSS>();
+  m1->beginModel();
+  m1->addSubModel(points_array[0], triangles_array[0]);
+  m1->endModel();
+
+  m2->beginModel();
+  m2->addSubModel(points_array[1], triangles_array[1]);
+  m2->endModel();
+
+  Transform3f id;
+  CollisionObject o1(boost::shared_ptr<CollisionGeometry>(m1), id);
+  CollisionObject o2(boost::shared_ptr<CollisionGeometry>(m2), id);
+
+  default_transform_distancer = DefaultTransformDistancer();
+  default_transform_distancer.rot_x_weight = 0;
+  default_transform_distancer.rot_y_weight = 0;
+  default_transform_distancer.rot_z_weight = 0;
+  std::cout << "rotation weights ";
+  default_transform_distancer.printRotWeight();
+  std::size_t KNN_K = 10;
+  LibSVMClassifier<3> classifier;
+  
+  std::vector<Transform3f> contact_vectors = penetrationDepthModelLearning(&o1, &o2, PDT_TRANSLATIONAL, &classifier, 10000, 1, KNN_GNAT, KNN_K);
+
+  classifier.save(filename + "model.txt");
+
+  
+
+  for(std::size_t frame_id = 0; frame_id < motions.size(); ++frame_id)
+  {
+    CollisionRequest c_request;
+    CollisionResult c_result;
+    collide(m1, motions[frame_id].first, m2, motions[frame_id].second, c_request, c_result);
+    if(c_result.numContacts() == 0)
+      std::cout << "0" << std::endl;
+    else
+    {
+      PenetrationDepthRequest request(&classifier, default_transform_distance_func);
+      request.contact_vectors = contact_vectors;
+      PenetrationDepthResult result;
+
+      penetrationDepth(m1, motions[frame_id].first, m2, motions[frame_id].second, request, result);
+
+
+      std::cout << result.pd_value << " ";      
+      
+      for(std::size_t i = 0; i < 3; ++i)
+      {
+        std::cout << result.resolved_tf.getTranslation()[i] << " ";
+      }
+
+      Matrix3f m = result.resolved_tf.getRotation();
+
+      for(std::size_t i = 0; i < 3; ++i)
+      {
+        for(std::size_t j = 0; j < 3; ++j)
+        {
+          std::cout << m(i, j) << " ";
+        }
+      }
+      std::cout << std::endl;
+    }
+    
+  }
+}
+
+
+static void sceneCollisionTest(const std::string& filename)
+{
+  std::vector<std::vector<Vec3f> > points_array;
+  std::vector<std::vector<Triangle> > triangles_array;
+  std::vector<std::pair<Transform3f, Transform3f> > motions;
+
+  loadSceneFile(filename, points_array, triangles_array, motions);
+
+  BVHModel<OBBRSS>* m1 = new BVHModel<OBBRSS>();
+  BVHModel<OBBRSS>* m2 = new BVHModel<OBBRSS>();
+  m1->beginModel();
+  m1->addSubModel(points_array[0], triangles_array[0]);
+  m1->endModel();
+
+  m2->beginModel();
+  m2->addSubModel(points_array[1], triangles_array[1]);
+  m2->endModel();
+
+  Transform3f id;
+  CollisionObject o1(boost::shared_ptr<CollisionGeometry>(m1), id);
+  CollisionObject o2(boost::shared_ptr<CollisionGeometry>(m2), id);
+
+  for(std::size_t i = 0; i < motions.size(); ++i)
+  {
+    CollisionRequest request(100000, true);
+    CollisionResult result;
+    std::vector<Contact> contacts;
+    collide(m1, motions[i].first, m2, motions[i].second, request, result);
+    result.getContacts(contacts);
+    std::cout << i << ": " << result.numContacts() << std::endl;
+    if(contacts.size() > 0)
+    {
+      for(std::size_t j = 0; j < result.numContacts(); ++j)
+        std::cout << "(" << contacts[j].b1 << "," << contacts[j].b2 << ")";
+      std::cout << std::endl;
     }
   }
 }
@@ -326,14 +767,33 @@ static void scenePenetrationTest(const std::string& filename, PenetrationDepthTy
 
 BOOST_AUTO_TEST_CASE(scene_test_penetration)
 {
-  RNG::setSeed(1);
   boost::filesystem::path path(TEST_RESOURCES_DIR);
 
-  std::cout << "manyframes/Model_1" << std::endl;
-  std::string filename0 = (path / "manyframes/Model_1.xml").string();
-  scenePenetrationTest(filename0);
+  
+  RNG::setSeed(1);
+
+  //std::cout << "manyframes/Model_7a" << std::endl;
+  //std::string filename0 = (path / "manyframes/Model_7a.xml").string();
+  //scenePenetrationTest_forBenchmark1a(filename0);
+
+  
+  //std::cout << "manyframes/Model_7a" << std::endl;
+  //std::string filename0 = (path / "manyframes/Model_7a.xml").string();
+  //scenePenetrationR3Test(filename0, true);
+  //scenePenetrationTest(filename0, true);
+
+  //std::cout << "manyframes/Model_7b" << std::endl;
+  //std::string filename0 = (path / "manyframes/Model_7b.xml").string();
+  //scenePenetrationR3Test(filename0, false);
+  //scenePenetrationTest(filename0, false);
+
+  
+  std::cout << "manyframes/Model_6" << std::endl;
+  std::string filename0 = (path / "manyframes/Model_6.xml").string();
+  scenePenetrationTest(filename0, true);
 
   return;
+
 
 
   std::cout << "scenario-1-2-3/Model_1_Scenario_1" << std::endl;
